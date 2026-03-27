@@ -25,7 +25,12 @@ defmodule Terrarium.Providers.Exe do
   - `:name` — VM name (optional, auto-generated if not provided)
   - `:image` — container image (default: `"boldsoftware/exeuntu"`)
   - `:env` — environment variables map (optional)
-  - `:ssh_key_path` — path to SSH private key for VM access (default: `"~/.ssh/id_ed25519"`)
+  - `:auth` — SSH authentication, same as `Terrarium.Provider.auth()`:
+    - `{:key_path, path}` — path to a private key file (default: `"~/.ssh/id_ed25519"`)
+    - `{:key, pem_string}` — private key as a PEM string
+    - `{:password, password}` — password authentication
+    - `{:user_dir, dir}` — directory containing SSH keys
+    - `nil` — use default SSH key discovery
   - `:ssh_user` — SSH user for VM access (default: `"exedev"`)
 
   ## Authentication
@@ -41,7 +46,7 @@ defmodule Terrarium.Providers.Exe do
   @default_api_url "https://exe.dev"
   @default_image "boldsoftware/exeuntu"
   @default_ssh_user "exedev"
-  @default_ssh_key_path "~/.ssh/id_ed25519"
+  @default_auth {:key_path, "~/.ssh/id_ed25519"}
   @default_exec_timeout 120_000
 
   @impl true
@@ -51,7 +56,7 @@ defmodule Terrarium.Providers.Exe do
     name = Keyword.get(opts, :name)
     image = Keyword.get(opts, :image, @default_image)
     env = Keyword.get(opts, :env, %{})
-    ssh_key_path = Keyword.get(opts, :ssh_key_path, @default_ssh_key_path)
+    auth = Keyword.get(opts, :auth, @default_auth)
     ssh_user = Keyword.get(opts, :ssh_user, @default_ssh_user)
 
     cmd_parts = ["new", "--json", "--no-email"]
@@ -70,7 +75,7 @@ defmodule Terrarium.Providers.Exe do
         ssh_host = resp["ssh_dest"] || "#{vm_name}.exe.xyz"
 
         # Establish SSH connection for exec/file operations
-        case connect_ssh(ssh_host, ssh_user, ssh_key_path) do
+        case connect_ssh(ssh_host, ssh_user, auth) do
           {:ok, conn} ->
             sandbox = %Terrarium.Sandbox{
               id: vm_name,
@@ -81,7 +86,7 @@ defmodule Terrarium.Providers.Exe do
                 "token" => token,
                 "ssh_host" => ssh_host,
                 "ssh_user" => ssh_user,
-                "ssh_key_path" => ssh_key_path,
+                "auth" => serialize_auth(auth),
                 "conn" => conn
               }
             }
@@ -147,7 +152,7 @@ defmodule Terrarium.Providers.Exe do
     if conn && Process.alive?(conn) do
       {:ok, sandbox}
     else
-      case connect_ssh(state["ssh_host"], state["ssh_user"], state["ssh_key_path"]) do
+      case connect_ssh(state["ssh_host"], state["ssh_user"], deserialize_auth(state["auth"])) do
         {:ok, conn} ->
           {:ok, %{sandbox | state: Map.put(state, "conn", conn)}}
 
@@ -164,7 +169,7 @@ defmodule Terrarium.Providers.Exe do
        host: state["ssh_host"],
        port: 22,
        user: state["ssh_user"],
-       auth: {:key_path, state["ssh_key_path"]}
+       auth: deserialize_auth(state["auth"])
      ]}
   end
 
@@ -277,15 +282,14 @@ defmodule Terrarium.Providers.Exe do
   # SSH
   # ============================================================================
 
-  defp connect_ssh(host, user, key_path) do
-    expanded_key = Path.expand(key_path)
-
-    ssh_opts = [
-      user: to_charlist(user),
-      silently_accept_hosts: true,
-      user_interaction: false,
-      key_cb: {Terrarium.Providers.SSH.KeyCb, key_path: expanded_key}
-    ]
+  defp connect_ssh(host, user, auth) do
+    ssh_opts =
+      [
+        user: to_charlist(user),
+        silently_accept_hosts: true,
+        user_interaction: false
+      ]
+      |> add_auth_opts(auth)
 
     Logger.debug("Connecting SSH to exe.dev VM", host: host, user: user)
 
@@ -298,6 +302,34 @@ defmodule Terrarium.Providers.Exe do
         {:error, reason}
     end
   end
+
+  defp add_auth_opts(ssh_opts, nil), do: ssh_opts
+
+  defp add_auth_opts(ssh_opts, {:password, password}), do: Keyword.put(ssh_opts, :password, to_charlist(password))
+
+  defp add_auth_opts(ssh_opts, {:key, pem}),
+    do: Keyword.put(ssh_opts, :key_cb, {Terrarium.Providers.SSH.KeyCb, key: pem})
+
+  defp add_auth_opts(ssh_opts, {:key_path, path}) do
+    # Use user_dir with the key's parent directory so Erlang's built-in SSH
+    # key discovery handles algorithm negotiation correctly (key_cb can fail
+    # with some SSH proxies like SSHPiper).
+    Keyword.put(ssh_opts, :user_dir, to_charlist(Path.dirname(Path.expand(path))))
+  end
+
+  defp add_auth_opts(ssh_opts, {:user_dir, dir}), do: Keyword.put(ssh_opts, :user_dir, to_charlist(Path.expand(dir)))
+
+  defp serialize_auth(nil), do: nil
+  defp serialize_auth({:password, password}), do: %{"type" => "password", "value" => password}
+  defp serialize_auth({:key, pem}), do: %{"type" => "key", "value" => pem}
+  defp serialize_auth({:key_path, path}), do: %{"type" => "key_path", "value" => path}
+  defp serialize_auth({:user_dir, dir}), do: %{"type" => "user_dir", "value" => dir}
+
+  defp deserialize_auth(nil), do: nil
+  defp deserialize_auth(%{"type" => "password", "value" => v}), do: {:password, v}
+  defp deserialize_auth(%{"type" => "key", "value" => v}), do: {:key, v}
+  defp deserialize_auth(%{"type" => "key_path", "value" => v}), do: {:key_path, v}
+  defp deserialize_auth(%{"type" => "user_dir", "value" => v}), do: {:user_dir, v}
 
   defp collect_response(conn, channel, timeout) do
     collect_response(conn, channel, timeout, %{stdout: "", stderr: "", exit_status: 0})
