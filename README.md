@@ -1,5 +1,9 @@
 # TerrariumExe
 
+[![Hex.pm](https://img.shields.io/hexpm/v/terrarium_exe.svg)](https://hex.pm/packages/terrarium_exe)
+[![HexDocs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/terrarium_exe)
+[![CI](https://github.com/pepicrft/terrarium_exe/actions/workflows/terrarium_exe.yml/badge.svg)](https://github.com/pepicrft/terrarium_exe/actions/workflows/terrarium_exe.yml)
+
 [exe.dev](https://exe.dev) provider for [Terrarium](https://github.com/pepicrft/terrarium) sandbox environments.
 
 exe.dev provides persistent Linux VMs with sub-second start times, unrestricted outbound internet access, and SSH-based access.
