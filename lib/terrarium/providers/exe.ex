@@ -77,19 +77,21 @@ defmodule Terrarium.Providers.Exe do
         # Establish SSH connection for exec/file operations
         case connect_ssh(ssh_host, ssh_user, auth) do
           {:ok, conn} ->
-            sandbox = %Terrarium.Sandbox{
-              id: vm_name,
-              provider: __MODULE__,
-              state: %{
-                "vm_name" => vm_name,
-                "api_url" => api_url,
-                "token" => token,
-                "ssh_host" => ssh_host,
-                "ssh_user" => ssh_user,
-                "auth" => serialize_auth(auth),
-                "conn" => conn
+            sandbox =
+              %Terrarium.Sandbox{
+                id: vm_name,
+                provider: __MODULE__,
+                state: %{
+                  "vm_name" => vm_name,
+                  "api_url" => api_url,
+                  "token" => token,
+                  "ssh_host" => ssh_host,
+                  "ssh_user" => ssh_user,
+                  "auth" => serialize_auth(auth),
+                  "conn" => conn
+                }
               }
-            }
+              |> Map.put(:name, name || vm_name)
 
             {:ok, sandbox}
 
