@@ -271,8 +271,10 @@ defmodule Terrarium.Providers.Exe do
     # Using -q to suppress progress meter, -o options for non-interactive use.
     scp_args =
       [
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
         "-q"
       ] ++ auth_to_scp_flags(auth) ++ [local_path, "#{state["ssh_user"]}@#{ssh_host}:#{remote_path}"]
 
