@@ -1,6 +1,19 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.4.0] - 2026-03-28
+
+### Bug Fixes
+
+- fix: Format scp args list
+
+- fix: Address review feedback on transfer/4
+
+
+### Features
+
+- feat: Implement transfer/4 using scp for fast file transfers
+
 ## [0.3.0] - 2026-03-28
 
 ### Features
