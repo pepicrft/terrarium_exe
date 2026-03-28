@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0] - 2026-03-28
+
+### Features
+
+- feat: Update terrarium to ~> 0.5 for Sandbox name field support
+
 ## [0.1.0] - 2026-03-27
 
 ### Bug Fixes
