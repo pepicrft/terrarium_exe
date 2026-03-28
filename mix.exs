@@ -32,7 +32,7 @@ defmodule TerrariumExe.MixProject do
 
   defp deps do
     [
-      {:terrarium, "~> 0.4"},
+      {:terrarium, "~> 0.5"},
       {:req, "~> 0.5"},
 
       # Development & Testing
