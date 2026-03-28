@@ -262,50 +262,67 @@ defmodule Terrarium.Providers.Exe do
     # Ensure remote parent directory exists
     remote_dir = Path.dirname(remote_path)
 
-    case exec_on_conn(state["conn"], "mkdir -p #{remote_dir}", 10_000) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
+    with {:ok, _} <- exec_on_conn(state["conn"], "mkdir -p #{remote_dir}", 10_000) do
+      {scp_flags, temp_files} = auth_to_scp_flags(auth)
 
-    # -C is disabled because the tarball is already compressed.
-    # Using -q to suppress progress meter, -o options for non-interactive use.
-    scp_args =
-      [
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-q"
-      ] ++ auth_to_scp_flags(auth) ++ [local_path, "#{state["ssh_user"]}@#{ssh_host}:#{remote_path}"]
+      scp_args =
+        [
+          "-o",
+          "StrictHostKeyChecking=no",
+          "-o",
+          "UserKnownHostsFile=/dev/null",
+          "-q"
+        ] ++ scp_flags ++ [local_path, "#{state["ssh_user"]}@#{ssh_host}:#{remote_path}"]
 
-    Logger.debug("Running scp", args: Enum.join(scp_args, " "))
+      Logger.debug("Running scp", args: Enum.join(scp_args, " "))
 
-    case System.cmd("scp", scp_args, stderr_to_stdout: true) do
-      {_, 0} ->
-        Logger.debug("Transfer complete", sandbox_id: state["vm_name"])
-        :ok
+      try do
+        case System.cmd("scp", scp_args, stderr_to_stdout: true) do
+          {_, 0} ->
+            Logger.debug("Transfer complete", sandbox_id: state["vm_name"])
+            :ok
 
-      {output, code} ->
-        Logger.error("scp failed", exit_code: code, output: output)
-        {:error, {:scp_failed, code, output}}
+          {output, code} ->
+            Logger.error("scp failed", exit_code: code, output: output)
+            {:error, {:scp_failed, code, output}}
+        end
+      after
+        Enum.each(temp_files, &File.rm/1)
+      end
     end
   end
 
-  defp auth_to_scp_flags({:key_path, path}), do: ["-i", Path.expand(path)]
+  defp auth_to_scp_flags({:key_path, path}), do: {["-i", Path.expand(path)], []}
 
   defp auth_to_scp_flags({:key, pem}) do
     tmp = Path.join(System.tmp_dir!(), "terrarium_scp_key_#{:erlang.unique_integer([:positive])}")
     File.write!(tmp, pem)
     File.chmod!(tmp, 0o600)
-    ["-i", tmp]
+    {["-i", tmp], [tmp]}
   end
 
   defp auth_to_scp_flags({:user_dir, dir}) do
     expanded = Path.expand(dir)
-    ["-i", Path.join(expanded, "id_ed25519")]
+    {["-i", Path.join(expanded, "id_ed25519")], []}
   end
 
-  defp auth_to_scp_flags(_), do: []
+  defp auth_to_scp_flags({:password, password}) do
+    # Use sshpass for password-based SCP authentication
+    askpass = Path.join(System.tmp_dir!(), "terrarium_scp_askpass_#{:erlang.unique_integer([:positive])}")
+    File.write!(askpass, "#!/bin/sh\necho '#{String.replace(password, "'", "'\\''")}'\n")
+    File.chmod!(askpass, 0o700)
+
+    {[
+       "-o",
+       "SetEnv=SSH_ASKPASS=#{askpass}",
+       "-o",
+       "SetEnv=SSH_ASKPASS_REQUIRE=force",
+       "-o",
+       "SetEnv=DISPLAY=:0"
+     ], [askpass]}
+  end
+
+  defp auth_to_scp_flags(_), do: {[], []}
 
   defp exec_on_conn(conn, command, timeout) do
     case :ssh_connection.session_channel(conn, timeout) do
