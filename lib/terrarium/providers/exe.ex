@@ -247,6 +247,75 @@ defmodule Terrarium.Providers.Exe do
     end
   end
 
+  @impl true
+  def transfer(%Terrarium.Sandbox{state: state}, local_path, remote_path, _opts \\ []) do
+    ssh_host = state["ssh_host"]
+    auth = deserialize_auth(state["auth"])
+
+    Logger.debug("Transferring file via scp",
+      sandbox_id: state["vm_name"],
+      local_path: local_path,
+      remote_path: remote_path,
+      size_bytes: File.stat!(local_path).size
+    )
+
+    # Ensure remote parent directory exists
+    remote_dir = Path.dirname(remote_path)
+
+    case exec_on_conn(state["conn"], "mkdir -p #{remote_dir}", 10_000) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+
+    # -C is disabled because the tarball is already compressed.
+    # Using -q to suppress progress meter, -o options for non-interactive use.
+    scp_args =
+      [
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-q"
+      ] ++ auth_to_scp_flags(auth) ++ [local_path, "#{state["ssh_user"]}@#{ssh_host}:#{remote_path}"]
+
+    Logger.debug("Running scp", args: Enum.join(scp_args, " "))
+
+    case System.cmd("scp", scp_args, stderr_to_stdout: true) do
+      {_, 0} ->
+        Logger.debug("Transfer complete", sandbox_id: state["vm_name"])
+        :ok
+
+      {output, code} ->
+        Logger.error("scp failed", exit_code: code, output: output)
+        {:error, {:scp_failed, code, output}}
+    end
+  end
+
+  defp auth_to_scp_flags({:key_path, path}), do: ["-i", Path.expand(path)]
+
+  defp auth_to_scp_flags({:key, pem}) do
+    tmp = Path.join(System.tmp_dir!(), "terrarium_scp_key_#{:erlang.unique_integer([:positive])}")
+    File.write!(tmp, pem)
+    File.chmod!(tmp, 0o600)
+    ["-i", tmp]
+  end
+
+  defp auth_to_scp_flags({:user_dir, dir}) do
+    expanded = Path.expand(dir)
+    ["-i", Path.join(expanded, "id_ed25519")]
+  end
+
+  defp auth_to_scp_flags(_), do: []
+
+  defp exec_on_conn(conn, command, timeout) do
+    case :ssh_connection.session_channel(conn, timeout) do
+      {:ok, channel} ->
+        :success = :ssh_connection.exec(conn, channel, to_charlist(command), timeout)
+        collect_response(conn, channel, timeout)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # ============================================================================
   # HTTPS API
   # ============================================================================
