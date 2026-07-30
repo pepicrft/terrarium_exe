@@ -33,7 +33,7 @@ defmodule TerrariumExe.MixProject do
   defp deps do
     [
       {:terrarium, "~> 0.7"},
-      {:req, "~> 0.5"},
+      {:req, "~> 0.7"},
 
       # Development & Testing
       {:quokka, "~> 2.12", only: [:dev, :test], runtime: false},
